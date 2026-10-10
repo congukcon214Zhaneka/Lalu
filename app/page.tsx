@@ -1,240 +1,616 @@
+
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import { LockKeyhole, Trash2, UserRound } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
-const moods = [
-  { emoji: "😢", label: "Sad" },
-  { emoji: "😔", label: "Tired" },
-  { emoji: "🙂", label: "Okay" },
-  { emoji: "😊", label: "Good" },
-  { emoji: "🥰", label: "Great" },
+type Mood = "Sad" | "Tired" | "Okay" | "Good" | "Great";
+
+type Resource = {
+  title: string;
+  text: string;
+  icon: string;
+};
+
+type JournalEntry = {
+  id: string;
+  date: string;
+  mood: Mood;
+  content: string;
+};
+
+type DatabaseEntry = {
+  id: string;
+  content: string;
+  mood: Mood | null;
+  created_at: string;
+};
+
+const moods: { name: Mood; emoji: string }[] = [
+  { name: "Sad", emoji: "😔" },
+  { name: "Tired", emoji: "😴" },
+  { name: "Okay", emoji: "😐" },
+  { name: "Good", emoji: "🙂" },
+  { name: "Great", emoji: "🥰" },
 ];
 
-const resources = [
+const resources: Resource[] = [
   {
-    icon: "☁",
     title: "Anxiety",
-    text: "A little reminder that you are safe to slow down.",
-  },
-  {
-    icon: "❀",
-    title: "Body image",
-    text: "Your body deserves care and rest today.",
-  },
-  {
     icon: "♡",
-    title: "Relationships",
-    text: "Healthy relationships should leave space for you too.",
+    text: "Pause for a moment. Notice where you are, what you can see, and how your feet feel on the ground.",
   },
   {
-    icon: "☆",
+    title: "Body image",
+    icon: "♡",
+    text: "Your body deserves care and rest today, whatever thoughts you have about it.",
+  },
+  {
+    title: "Relationships",
+    icon: "♡",
+    text: "What do you need from the people close to you? You can write it down before you decide to share.",
+  },
+  {
     title: "Self-esteem",
-    text: "You don't have to be perfect to be worthy.",
+    icon: "♡",
+    text: "Name one kind thing you did for yourself today, however small.",
   },
 ];
 
-export default function Home() {
-  const [selectedMood, setSelectedMood] = useState("");
-  const [entry, setEntry] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [selectedResource, setSelectedResource] = useState<string | null>(
-    null
-  );
+function getGreeting() {
+  const hour = new Date().getHours();
 
-  const handleSave = () => {
-    if (!entry.trim()) return;
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
-    setSaved(true);
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
-    setTimeout(() => {
-      setSaved(false);
-    }, 3000);
+function mapDatabaseEntry(entry: DatabaseEntry): JournalEntry {
+  return {
+    id: entry.id,
+    date: formatDate(entry.created_at),
+    mood: entry.mood ?? "Okay",
+    content: entry.content,
   };
+}
+
+function ResourcePanel() {
+  const [selectedResource, setSelectedResource] = useState(0);
+  const selected = resources[selectedResource];
 
   return (
-    <main className="min-h-screen bg-[#F7F4EF] text-[#3F3A35]">
-      {/* Header */}
-      <header className="border-b border-[#DED8CF] bg-[#F7F4EF]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 md:px-10">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-[-0.04em]">
-              lalu
-            </h1>
-            <p className="text-xs tracking-[0.16em] text-[#8A8178] uppercase">
-              space for you
-            </p>
-          </div>
+    <aside className="lalu-sidebar">
+      <div className="bear-area">
+        <div className="decor-star star-one">✧</div>
+        <div className="decor-star star-two">✦</div>
 
-          <nav className="flex items-center gap-6 text-sm">
-            <button className="transition-opacity hover:opacity-60">
+        <div className="bear-image">
+          <Image
+            src="/images/lalu-bear.png"
+            alt="LALU bear"
+            width={420}
+            height={420}
+            style={{ width: "100%", height: "auto" }}
+            priority
+          />
+        </div>
+
+        <div className="hello-text">hello ♡</div>
+      </div>
+
+      <div className="progress-card">
+        <span>♡</span>
+        <p>
+          progress,
+          <br />
+          not perfection
+        </p>
+      </div>
+
+      <div className="resources-card">
+        <h2>Quick resources</h2>
+
+        <div className="resource-grid">
+          {resources.map((resource, index) => (
+            <button
+              type="button"
+              key={resource.title}
+              className={`resource-item ${
+                selectedResource === index ? "resource-selected" : ""
+              }`}
+              onClick={() => setSelectedResource(index)}
+            >
+              <span className="resource-icon">{resource.icon}</span>
+              <span>{resource.title}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="resource-info">
+          <h3>{selected.title}</h3>
+          <p>{selected.text}</p>
+        </div>
+
+        <p className="resource-disclaimer">
+          LALU is a space to write and reflect. It does not replace support
+          from a qualified mental health professional.
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+export default function Home() {
+  const [page, setPage] = useState<"write" | "entries">("write");
+  const [greeting, setGreeting] = useState("Good evening");
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [content, setContent] = useState("");
+  const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loadingEntries, setLoadingEntries] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  useEffect(() => {
+    setGreeting(getGreeting());
+
+    const interval = window.setInterval(() => {
+      setGreeting(getGreeting());
+    }, 60 * 1000);
+
+    let active = true;
+
+    async function loadEntries() {
+      setLoadingEntries(true);
+      setActionError("");
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (!active) return;
+
+      if (userError || !user) {
+        setUserId(null);
+        setEntries([]);
+        setAuthChecked(true);
+        setLoadingEntries(false);
+        return;
+      }
+
+      setUserId(user.id);
+
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .select("id, content, mood, created_at")
+        .order("created_at", { ascending: false });
+
+      if (!active) return;
+
+      if (error) {
+        setActionError(
+          `Couldn't load your entries: ${error.message}`
+        );
+        setEntries([]);
+      } else {
+        setEntries(
+          ((data ?? []) as DatabaseEntry[]).map(mapDatabaseEntry)
+        );
+      }
+
+      setAuthChecked(true);
+      setLoadingEntries(false);
+    }
+
+    void loadEntries();
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  async function handleSave() {
+    setActionError("");
+    setSaved(false);
+
+    if (!content.trim()) {
+      setActionError("Write a little something before saving ♡");
+      return;
+    }
+
+    if (!userId) {
+      window.location.href = "/auth";
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .insert({
+          user_id: userId,
+          content: content.trim(),
+          mood: selectedMood ?? "Okay",
+        })
+        .select("id, content, mood, created_at")
+        .single();
+
+      if (error) throw error;
+
+      const newEntry = mapDatabaseEntry(data as DatabaseEntry);
+
+      setEntries((current) => [newEntry, ...current]);
+      setContent("");
+      setSelectedMood(null);
+      setSaved(true);
+
+      window.setTimeout(() => setSaved(false), 3000);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't save your entry. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (deleteId === null || !userId) return;
+
+    setActionError("");
+
+    const { error } = await supabase
+      .from("journal_entries")
+      .delete()
+      .eq("id", deleteId)
+      .eq("user_id", userId);
+
+    if (error) {
+      setActionError(`Couldn't delete your entry: ${error.message}`);
+      setDeleteId(null);
+      return;
+    }
+
+    setEntries((current) =>
+      current.filter((entry) => entry.id !== deleteId)
+    );
+
+    setDeleteId(null);
+  }
+
+  return (
+    <div className="lalu-page">
+      <header className="lalu-header">
+        <div className="lalu-header-inner">
+          <button
+            type="button"
+            className="lalu-brand"
+            onClick={() => setPage("write")}
+            aria-label="Go to LALU home"
+          >
+            <span className="lalu-logo">lalu</span>
+            <span className="lalu-tagline">space for you</span>
+          </button>
+
+          <nav className="lalu-nav">
+            <button
+              type="button"
+              className={page === "write" ? "nav-active" : ""}
+              onClick={() => setPage("write")}
+            >
               Write
             </button>
 
-            <button className="transition-opacity hover:opacity-60">
+            <button
+              type="button"
+              className={page === "entries" ? "nav-active" : ""}
+              onClick={() => setPage("entries")}
+            >
               My entries
             </button>
           </nav>
+
+
+<div className="account-area">
+  <button
+    type="button"
+    className="account-button"
+    onClick={() => {
+      window.location.href = userId ? "/profile" : "/auth";
+    }}
+    aria-label={userId ? "Open my profile" : "Log in or create an account"}
+    title={userId ? "My profile" : "Log in or create an account"}
+  >
+    <UserRound size={23} strokeWidth={1.6} />
+  </button>
+</div>
+
         </div>
       </header>
 
-      {/* Main content */}
-      <div className="mx-auto grid max-w-7xl gap-8 px-6 py-10 md:px-10 lg:grid-cols-[1fr_320px] lg:py-14">
-        {/* Left side */}
-        <section>
-          {/* Greeting */}
-          <div className="mb-10">
-            <p className="mb-3 text-xs font-medium tracking-[0.18em] text-[#9A9188] uppercase">
-              A little space, just for you
-            </p>
+      {page === "write" && (
+        <main className="lalu-container">
+          <div className="lalu-main-grid">
+            <section>
+              <div className="lalu-intro">
+                <div className="eyebrow">
+                  ✧ A LITTLE SPACE, JUST FOR YOU
+                </div>
+                <h1>
+                  {greeting} <span>♡</span>
+                </h1>
+                <p className="intro-subtitle">
+                  How are you feeling today?
+                </p>
+              </div>
 
-            <h2 className="text-4xl font-medium tracking-[-0.04em] md:text-5xl">
-              Good afternoon ♡
-            </h2>
-
-            <p className="mt-4 text-base text-[#81786F]">
-              How are you feeling today?
-            </p>
-          </div>
-
-          {/* Mood selector */}
-          <div className="mb-12 grid grid-cols-5 gap-2 sm:max-w-xl sm:gap-4">
-            {moods.map((mood) => {
-              const isSelected = selectedMood === mood.label;
-
-              return (
-                <button
-                  key={mood.label}
-                  onClick={() => setSelectedMood(mood.label)}
-                  className={`group flex flex-col items-center gap-2 rounded-2xl px-2 py-4 transition-all ${
-                    isSelected
-                      ? "bg-[#E8DED2] shadow-sm"
-                      : "hover:bg-[#EEE9E2]"
-                  }`}
-                >
-                  <span
-                    className={`text-2xl transition-transform ${
-                      isSelected ? "scale-110" : "group-hover:scale-105"
+              <div className="mood-grid">
+                {moods.map((mood) => (
+                  <button
+                    type="button"
+                    key={mood.name}
+                    className={`mood-item ${
+                      selectedMood === mood.name ? "mood-selected" : ""
                     }`}
+                    onClick={() => setSelectedMood(mood.name)}
                   >
-                    {mood.emoji}
-                  </span>
+                    <div className="mood-circle">{mood.emoji}</div>
+                    <div className="mood-label">{mood.name}</div>
+                  </button>
+                ))}
+              </div>
 
-                  <span className="text-xs text-[#756D65]">
-                    {mood.label}
-                  </span>
+              <div className="motivation-card">
+                <div className="motivation-icon">♡</div>
+                <div>
+                  <h3>It’s okay not to be okay.</h3>
+                  <p>You can still be proud of yourself today.</p>
+                </div>
+                <div className="motivation-heart">♡</div>
+              </div>
+
+              <section className="journal-section">
+                <div className="journal-title-row">
+                  <h2>What’s on your mind?</h2>
+                  <div className="private-label">
+                    <LockKeyhole size={17} strokeWidth={1.7} />
+                    <span>Private</span>
+                  </div>
+                </div>
+
+                <div className="journal-card">
+                  <textarea
+                    value={content}
+                    onChange={(event) => setContent(event.target.value)}
+                    maxLength={10000}
+                    placeholder="Start writing here..."
+                  />
+
+                  <div className="journal-bottom">
+                    <span className="character-count">
+                      {content.length.toLocaleString()} / 10,000
+                    </span>
+                    <span className="privacy-text">
+                      Your words are only visible to you.
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="save-button"
+                  onClick={handleSave}
+                  disabled={saving || !authChecked}
+                >
+                  {saving
+                    ? "Saving..."
+                    : !authChecked
+                      ? "Loading..."
+                      : "Save entry →"}
                 </button>
-              );
-            })}
+
+                {saved && (
+                  <div className="saved-message">
+                    Your entry was saved ♡
+                  </div>
+                )}
+
+                {actionError && (
+                  <p className="auth-feedback auth-error" role="alert">
+                    {actionError}
+                  </p>
+                )}
+
+                {!userId && authChecked && (
+                  <p className="privacy-text">
+                    Log in to save your private journal entries.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  className="read-entries"
+                  onClick={() => setPage("entries")}
+                >
+                  Read my entries →
+                </button>
+              </section>
+            </section>
+
+            <ResourcePanel />
           </div>
+        </main>
+      )}
 
-          {/* Journal */}
-          <section className="rounded-3xl border border-[#DED8CF] bg-[#FBF9F6] p-6 md:p-8">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-xl font-medium">What&apos;s on your mind?</h3>
+      {page === "entries" && (
+        <main className="entries-page">
+          <section>
+            <div className="entries-header">
+              <div className="eyebrow">✧ YOUR QUIET SPACE</div>
 
-              {selectedMood && (
-                <span className="rounded-full bg-[#EEE9E2] px-3 py-1 text-xs text-[#756D65]">
-                  Feeling {selectedMood.toLowerCase()}
-                </span>
+              <h1>
+                Your journal <span>♡</span>
+              </h1>
+
+              <p className="entries-subtitle">
+                A place to return to your words, whenever you need.
+              </p>
+
+              <button
+                type="button"
+                className="new-entry-link"
+                onClick={() => setPage("write")}
+              >
+                + Write a new entry
+              </button>
+
+              {saved && (
+                <div className="entries-status">
+                  Your entry was saved ♡
+                </div>
               )}
             </div>
 
-            <textarea
-              value={entry}
-              onChange={(event) => {
-                setEntry(event.target.value);
-                setSaved(false);
-              }}
-              maxLength={10000}
-              placeholder="Start writing here..."
-              className="min-h-[280px] w-full resize-none rounded-2xl border border-[#E3DDD5] bg-[#F7F4EF] p-5 text-base leading-7 outline-none placeholder:text-[#AAA198] focus:border-[#B9AEA2]"
-            />
-
-            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-xs text-[#9A9188]">
-                {entry.length.toLocaleString()} / 10,000
-              </span>
-
-              <button
-                onClick={handleSave}
-                disabled={!entry.trim()}
-                className="rounded-full bg-[#3F3A35] px-6 py-3 text-sm text-white transition-all hover:bg-[#554E47] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Save entry →
-              </button>
-            </div>
-
-            {saved && (
-              <p className="mt-4 text-sm text-[#81786F]">
-                Your entry was saved ♡
+            {actionError && (
+              <p className="auth-feedback auth-error" role="alert">
+                {actionError}
               </p>
             )}
-          </section>
-        </section>
 
-        {/* Right side */}
-        <aside className="space-y-6">
-          {/* Bear card */}
-          <div className="rounded-3xl bg-[#E8DED2] p-7">
-            <div className="mb-5 flex h-36 items-center justify-center">
-              <span className="text-8xl">🧸</span>
-            </div>
+            <div className="entries-list">
+              {loadingEntries ? (
+                <div className="empty-entries">
+                  <h2>Opening your journal ♡</h2>
+                  <p>Your entries will be here in a moment.</p>
+                </div>
+              ) : !userId ? (
+                <div className="empty-entries">
+                  <div className="empty-entries-heart">♡</div>
+                  <h2>Your journal is personal.</h2>
+                  <p>
+                    Log in to access your saved entries and keep your
+                    thoughts in your own private space.
+                  </p>
+                  <button
+                    type="button"
+                    className="save-button"
+                    onClick={() => {
+                      window.location.href = "/auth";
+                    }}
+                  >
+                    Log in → 
+                  </button>
+                </div>
+              ) : entries.length === 0 ? (
+                <div className="empty-entries">
+                  <div className="empty-entries-heart">♡</div>
+                  <h2>Your journal is waiting for you.</h2>
+                  <p>
+                    Write something down whenever you feel like it.
+                    There is no right or wrong way to begin.
+                  </p>
+                  <button
+                    type="button"
+                    className="save-button"
+                    onClick={() => setPage("write")}
+                  >
+                    Write your first entry →
+                  </button>
+                </div>
+              ) : (
+                entries.map((entry) => (
+                  <article className="entry-card" key={entry.id}>
+                    <div className="entry-top">
+                      <div>
+                        <div className="entry-date">{entry.date}</div>
+                        <div className="entry-mood">
+                          {
+                            moods.find(
+                              (mood) => mood.name === entry.mood
+                            )?.emoji
+                          }{" "}
+                          {entry.mood}
+                        </div>
+                      </div>
 
-            <p className="text-center text-lg italic text-[#665D55]">
-              progress,
-              <br />
-              not perfection
-            </p>
-          </div>
-
-          {/* Resources */}
-          <div className="rounded-3xl border border-[#DED8CF] bg-[#FBF9F6] p-6">
-            <h3 className="mb-5 text-lg font-medium">Quick resources</h3>
-
-            <div className="grid grid-cols-4 gap-2">
-              {resources.map((resource) => (
-                <button
-                  key={resource.title}
-                  onClick={() => setSelectedResource(resource.title)}
-                  className={`flex h-12 items-center justify-center rounded-xl text-lg transition-all ${
-                    selectedResource === resource.title
-                      ? "bg-[#E8DED2]"
-                      : "bg-[#F1ECE6] hover:bg-[#E8DED2]"
-                  }`}
-                  aria-label={resource.title}
-                >
-                  {resource.icon}
-                </button>
-              ))}
-            </div>
-
-            {selectedResource && (
-              <div className="mt-5 border-t border-[#E3DDD5] pt-5">
-                {resources
-                  .filter(
-                    (resource) => resource.title === selectedResource
-                  )
-                  .map((resource) => (
-                    <div key={resource.title}>
-                      <p className="mb-2 text-sm font-medium">
-                        {resource.title}
-                      </p>
-
-                      <p className="text-sm leading-6 text-[#81786F]">
-                        {resource.text}
-                      </p>
+                      <button
+                        type="button"
+                        className="delete-button"
+                        onClick={() => setDeleteId(entry.id)}
+                      >
+                        <Trash2 size={16} strokeWidth={1.7} />
+                        <span>Delete</span>
+                      </button>
                     </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        </aside>
-      </div>
 
-      {/* Footer */}
-      <footer className="mx-auto max-w-7xl px-6 pb-8 text-xs text-[#AAA198] md:px-10">
-        A little space, just for you ♡
+                    <p className="entry-content">{entry.content}</p>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <ResourcePanel />
+        </main>
+      )}
+
+      <footer className="lalu-footer">
+        made with care, for your quieter moments ♡
       </footer>
-    </main>
+
+      {deleteId !== null && (
+        <div className="delete-modal-overlay">
+          <div
+            className="delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-title"
+          >
+            <div className="delete-modal-heart">♡</div>
+            <h2 id="delete-title">Are you sure? ♡</h2>
+            <p>Are you sure you want to delete this entry?</p>
+            <p className="delete-modal-warning">
+              This action can&apos;t be undone.
+            </p>
+
+            <div className="delete-modal-actions">
+              <button
+                type="button"
+                className="cancel-delete"
+                onClick={() => setDeleteId(null)}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="confirm-delete"
+                onClick={handleDelete}
+              >
+                Delete entry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
